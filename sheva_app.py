@@ -8,7 +8,9 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="שבע - מערכת לקוחות", layout="wide")
 
 def get_gsheet_client():
-    # בניית המפתח בצורה דינמית כדי למנוע שגיאות PEM
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    # המפתח הפרטי מחולק לשורות - ניקוי רווחים אוטומטי למניעת שגיאות PEM
     key_lines = [
         "-----BEGIN PRIVATE KEY-----",
         "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDgx0d6ZMNqpXgL",
@@ -39,7 +41,8 @@ def get_gsheet_client():
         "/6m7o+DtMxUh5mdEQFdeABf1",
         "-----END PRIVATE KEY-----"
     ]
-    formatted_key = "\n".join(key_lines)
+    # כאן התיקון החשוב: מנקים רווחים נסתרים מכל שורה ומחברים מחדש
+    formatted_key = "\n".join([line.strip() for line in key_lines])
     
     info = {
         "type": "service_account",
@@ -50,7 +53,6 @@ def get_gsheet_client():
         "token_uri": "https://oauth2.googleapis.com/token",
     }
     
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(info, scopes=scope)
     return gspread.authorize(creds)
 
@@ -83,7 +85,7 @@ def save_to_sheet(row_dict):
         st.error(f"❌ שגיאה: {e}")
         return False
 
-# --- הממשק של שבע ---
+# --- ממשק שבע ---
 st.title("🛡️ שבע – מערכת לקוחות")
 
 if 'crm_data' not in st.session_state:
