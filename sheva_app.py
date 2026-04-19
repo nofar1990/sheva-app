@@ -20,7 +20,6 @@ def load_data():
     except:
         return pd.DataFrame(columns=['ת.ז לקוח', 'סטטוס', 'נציג', 'הערות', 'עדכון'])
 
-# פונקציה חכמה לזיהוי עמודות
 def get_col(df, options):
     for opt in options:
         if opt in df.columns: return opt
@@ -40,43 +39,49 @@ if uploaded_file:
         df = df.dropna(subset=['ת.ז לקוח', 'שם לקוח']).copy()
         df['ת.ז לקוח'] = df['ת.ז לקוח'].astype(str).str.replace('.0', '', regex=False).str.strip()
 
-        # זיהוי עמודות לטובת הניתוח
+        # זיהוי עמודות
         c_age = get_col(df, ['גיל', 'תאריך לידה'])
         c_prod = get_col(df, ['סוג מוצר', 'שם מוצר', 'תוכנית'])
         c_prem = get_col(df, ['פרמיה חודשית', 'פרמיה', 'סך פרמיה'])
+        c_comp = get_col(df, ['חברה', 'שם חברה', 'שם יצרן', 'יצרן'])
 
         # --- הניתוח של ג'ימי ---
         st.markdown("### 🤖 הניתוח של ג'ימי - התראות והזדמנויות")
         
-        # 1. איתור פוטנציאל לתכנון פרישה (גיל 55+)
+        # המרה בטוחה למספרים כדי למנוע את שגיאת ה-dtype
+        df_analysis = df.copy()
+        if c_age:
+            df_analysis[c_age] = pd.to_numeric(df_analysis[c_age], errors='coerce').fillna(0)
+        if c_prem:
+            df_analysis[c_premium_num] = pd.to_numeric(df_analysis[c_prem], errors='coerce').fillna(0)
+        else:
+            df_analysis['premium_num'] = 0
+
+        # 1. פוטנציאל פרישה
         retire_potential = []
         if c_age:
-            retire_potential = df[df[c_age] >= 55]['שם לקוח'].unique().tolist()
+            retire_potential = df_analysis[df_analysis[c_age] >= 55]['שם לקוח'].unique().tolist()
         
-        # 2. איתור פרמיה גבוהה (מעל 1500 ש"ח)
+        # 2. פרמיה גבוהה
         high_prem = []
-        if c_prem:
-            df['temp_prem'] = pd.to_numeric(df[c_prem], errors='coerce').fillna(0)
-            high_prem = df[df['temp_prem'] >= 1500]['שם לקוח'].unique().tolist()
+        target_prem_col = c_premium_num if 'premium_num' not in locals() else 'premium_num'
+        high_prem = df_analysis[df_analysis[target_prem_col] >= 1500]['שם לקוח'].unique().tolist()
 
-        # 3. איתור חוסר בביטוחים (לקוחות שיש להם רק מוצר אחד בתיק)
-        single_prod = df.groupby('שם לקוח')['ת.ז לקוח'].count()
-        single_prod_list = single_prod[single_prod == 1].index.tolist()
+        # 3. חוסר בביטוחים
+        counts = df_analysis.groupby('שם לקוח')['ת.ז לקוח'].count()
+        single_prod_list = counts[counts == 1].index.tolist()
 
         # תצוגת התראות
-        col_j1, col_j2, col_j3 = st.columns(3)
-        
-        with col_j1:
-            st.error(f"👨‍קצבה/פרישה ({len(retire_potential)})")
-            if retire_potential: st.caption(f"דוגמאות: {', '.join(retire_potential[:3])}...")
-            
-        with col_j2:
+        j1, j2, j3 = st.columns(3)
+        with j1:
+            st.error(f"👨‍ קצבה/פרישה ({len(retire_potential)})")
+            if retire_potential: st.caption(f"למשל: {', '.join(retire_potential[:2])}")
+        with j2:
             st.warning(f"💰 פרמיה גבוהה ({len(high_prem)})")
-            if high_prem: st.caption(f"דוגמאות: {', '.join(high_prem[:3])}...")
-
-        with col_j3:
-            st.info(f"🛡️ חוסר בביטוחים ({len(single_prod_list)})")
-            if single_prod_list: st.caption(f"דוגמאות: {', '.join(single_prod_list[:3])}...")
+            if high_prem: st.caption(f"למשל: {', '.join(high_prem[:2])}")
+        with j3:
+            st.info(f"🛡️ מוצר יחיד בתיק ({len(single_prod_list)})")
+            if single_prod_list: st.caption(f"למשל: {', '.join(single_prod_list[:2])}")
 
         st.divider()
 
@@ -90,7 +95,6 @@ if uploaded_file:
             cid = str(row['ת.ז לקוח'])
             stored = st.session_state.crm_data
             current = stored[stored['ת.ז לקוח'] == cid]
-            
             s_val = current['סטטוס'].values[0] if not current.empty else "חדש"
             n_val = current['הערות'].values[0] if not current.empty else ""
 
@@ -99,12 +103,11 @@ if uploaded_file:
                 with c1:
                     st.write(f"**ת.ז:** {cid}")
                     st.write(f"**טלפון:** {row['טלפון סלולרי']}")
-                    # תגית מיוחדת אם הלקוח בקטגוריית פרישה
-                    if row['שם לקוח'] in retire_potential: st.error("פוטנציאל לתכנון פרישה")
-                    if row['שם לקוח'] in high_prem: st.warning("פרמיה גבוהה - לבדוק הוזלה")
+                    if row['שם לקוח'] in retire_potential: st.error("גיל פרישה")
+                    if row['שם לקוח'] in high_prem: st.warning("פרמיה גבוהה")
                 
                 with c2:
-                    st.write("**פירוט מוצרים מלא:**")
+                    st.write("**מוצרים:**")
                     st.dataframe(df[df['ת.ז לקוח'] == cid].dropna(axis=1, how='all'), hide_index=True)
 
                 st.divider()
@@ -119,10 +122,9 @@ if uploaded_file:
                     payload = {'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע", 'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")}
                     requests.post(SCRIPT_URL, json=payload)
                     st.session_state.crm_data = load_data()
-                    st.success("נשמר!")
                     st.rerun()
 
     except Exception as e:
         st.error(f"שגיאה בהצגת הנתונים: {e}")
 else:
-    st.info("👋 ברוכים הבאים. העלו קובץ ROETO להפעלת ג'ימי.")
+    st.info("👋 ברוכים הבאים. העלו קובץ ROETO.")
