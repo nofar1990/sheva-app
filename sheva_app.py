@@ -35,6 +35,7 @@ uploaded_file = st.file_uploader("טעינת נתוני ROETO", type=['xlsx', 'c
 
 if uploaded_file:
     try:
+        # טעינת נתונים
         df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
         df = df.dropna(subset=['ת.ז לקוח', 'שם לקוח']).copy()
         df['ת.ז לקוח'] = df['ת.ז לקוח'].astype(str).str.replace('.0', '', regex=False).str.strip()
@@ -45,29 +46,21 @@ if uploaded_file:
         c_prem = get_col(df, ['פרמיה חודשית', 'פרמיה', 'סך פרמיה'])
         c_comp = get_col(df, ['חברה', 'שם חברה', 'שם יצרן', 'יצרן'])
 
+        # הכנת נתונים לניתוח (המרה למספרים)
+        df_analysis = df.copy()
+        df_analysis['age_num'] = pd.to_numeric(df_analysis[c_age], errors='coerce').fillna(0) if c_age else 0
+        df_analysis['premium_num'] = pd.to_numeric(df_analysis[c_prem], errors='coerce').fillna(0) if c_prem else 0
+
         # --- הניתוח של ג'ימי ---
         st.markdown("### 🤖 הניתוח של ג'ימי - התראות והזדמנויות")
         
-        # המרה בטוחה למספרים כדי למנוע את שגיאת ה-dtype
-        df_analysis = df.copy()
-        if c_age:
-            df_analysis[c_age] = pd.to_numeric(df_analysis[c_age], errors='coerce').fillna(0)
-        if c_prem:
-            df_analysis[c_premium_num] = pd.to_numeric(df_analysis[c_prem], errors='coerce').fillna(0)
-        else:
-            df_analysis['premium_num'] = 0
-
-        # 1. פוטנציאל פרישה
-        retire_potential = []
-        if c_age:
-            retire_potential = df_analysis[df_analysis[c_age] >= 55]['שם לקוח'].unique().tolist()
+        # 1. פוטנציאל פרישה (55+)
+        retire_potential = df_analysis[df_analysis['age_num'] >= 55]['שם לקוח'].unique().tolist()
         
-        # 2. פרמיה גבוהה
-        high_prem = []
-        target_prem_col = c_premium_num if 'premium_num' not in locals() else 'premium_num'
-        high_prem = df_analysis[df_analysis[target_prem_col] >= 1500]['שם לקוח'].unique().tolist()
+        # 2. פרמיה גבוהה (מעל 1500)
+        high_prem = df_analysis[df_analysis['premium_num'] >= 1500]['שם לקוח'].unique().tolist()
 
-        # 3. חוסר בביטוחים
+        # 3. חוסר בביטוחים (לקוח עם מוצר אחד בלבד)
         counts = df_analysis.groupby('שם לקוח')['ת.ז לקוח'].count()
         single_prod_list = counts[counts == 1].index.tolist()
 
@@ -86,10 +79,13 @@ if uploaded_file:
         st.divider()
 
         # --- רשימת לקוחות ---
-        search = st.text_input("🔍 חיפוש לקוח:")
+        search = st.text_input("🔍 חיפוש לקוח לפי שם:")
         clients_summary = df.groupby('ת.ז לקוח').agg({'שם לקוח': 'first', 'טלפון סלולרי': 'first'}).reset_index()
         
-        display_df = clients_summary[clients_summary['שם לקוח'].str.contains(search, na=False)] if search else clients_summary.head(15)
+        if search:
+            display_df = clients_summary[clients_summary['שם לקוח'].str.contains(search, na=False)]
+        else:
+            display_df = clients_summary.head(15)
 
         for _, row in display_df.iterrows():
             cid = str(row['ת.ז לקוח'])
@@ -107,24 +103,25 @@ if uploaded_file:
                     if row['שם לקוח'] in high_prem: st.warning("פרמיה גבוהה")
                 
                 with c2:
-                    st.write("**מוצרים:**")
+                    st.write("**מוצרים בתיק:**")
                     st.dataframe(df[df['ת.ז לקוח'] == cid].dropna(axis=1, how='all'), hide_index=True)
 
                 st.divider()
                 e1, e2 = st.columns(2)
                 with e1:
-                    new_s = st.selectbox("סטטוס:", ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"], key=f"s_{cid}",
+                    new_s = st.selectbox("שינוי סטטוס:", ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"], key=f"s_{cid}",
                                          index=["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"].index(s_val) if s_val in ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"] else 0)
                 with e2:
-                    new_n = st.text_area("הערות:", value=n_val, key=f"n_{cid}")
+                    new_n = st.text_area("הערות לטיפול:", value=n_val, key=f"n_{cid}")
                 
                 if st.button("שמור עדכון", key=f"b_{cid}"):
                     payload = {'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע", 'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")}
                     requests.post(SCRIPT_URL, json=payload)
                     st.session_state.crm_data = load_data()
+                    st.success("נשמר!")
                     st.rerun()
 
     except Exception as e:
         st.error(f"שגיאה בהצגת הנתונים: {e}")
 else:
-    st.info("👋 ברוכים הבאים. העלו קובץ ROETO.")
+    st.info("👋 שלום צוות שבע. העלו קובץ ROETO.")
