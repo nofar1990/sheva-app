@@ -10,7 +10,7 @@ st.set_page_config(page_title="שבע - מערכת לקוחות", layout="wide")
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # המפתח הפרטי מחולק לשורות - שיטת ה-strip מבטיחה ששום רווח נסתר לא ישבור את ה-PEM
+    # המפתח הפרטי מחולק לשורות - שיטת ה-strip() והסינון מוודאים ששום תו נסתר לא ישבור את ה-PEM
     key_lines = [
         "-----BEGIN PRIVATE KEY-----",
         "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDgx0d6ZMNqpXgL",
@@ -41,8 +41,9 @@ def get_gsheet_client():
         "/6m7o+DtMxUh5mdEQFdeABf1",
         "-----END PRIVATE KEY-----"
     ]
-    # חיבור השורות עם אנטרים נקיים בלבד
-    formatted_key = "\n".join([line.strip() for line in key_lines])
+    
+    # חיבור השורות עם אנטרים נקיים תוך הסרת רווחים סמויים מכל שורה ושורה
+    formatted_key = "\n".join([line.strip() for line in key_lines if line.strip()])
     
     info = {
         "type": "service_account",
@@ -82,7 +83,7 @@ def save_to_sheet(row_dict):
         sheet.update([df.columns.values.tolist()] + df.values.tolist())
         return True
     except Exception as e:
-        st.error(f"❌ שגיאה טכנית: {e}")
+        st.error(f"❌ שגיאה טכנית בשמירה: {e}")
         return False
 
 # --- ממשק שבע ---
@@ -112,7 +113,7 @@ if uploaded_file:
             new_s = st.selectbox("סטטוס:", ["חדש", "בטיפול", "הושלם"], key=f"s_{cid}", index=["חדש", "בטיפול", "הושלם"].index(s_val))
             new_n = st.text_area("הערות:", value=n_val, key=f"n_{cid}")
             if st.button("שמור שינויים", key=f"b_{cid}"):
-                with st.spinner("שומר..."):
+                with st.spinner("שומר לשיטס..."):
                     if save_to_sheet({'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע", 'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")}):
                         st.session_state.crm_data = load_data()
                         st.success("✅ נשמר!")
