@@ -33,8 +33,11 @@ uploaded_file = st.file_uploader("טעינת נתוני ROETO", type=['xlsx', 'c
 
 if uploaded_file:
     try:
-        df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
-        df['ת.ז לקוח'] = df['ת.ז לקוח'].astype(str)
+        df_raw = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
+        
+        # ניקוי שורות ריקות וערכים חסרים בת"ז (מונע את שגיאת ה-nan)
+        df = df_raw.dropna(subset=['ת.ז לקוח']).copy()
+        df['ת.ז לקוח'] = df['ת.ז לקוח'].astype(str).str.strip()
         
         # זיהוי עמודות
         c_assets = get_col(df, ['צבירה', 'צבירה כוללת', 'שווי נכסים', 'סכום צבירה'])
@@ -45,22 +48,32 @@ if uploaded_file:
         # --- הצינור של ג'ימי: ניתוח חכם ופתיח ---
         st.markdown(f"### 🤖 ג'ימי מנתח עבורך את הנתונים...")
         
-        # זיהוי לקוחות לטיפול דחוף (למשל צבירה מעל 100k שעדיין בסטטוס 'חדש')
-        merged_logic = df.groupby('ת.ז לקוח').agg({c_assets: 'sum', 'שם לקוח': 'first'}).reset_index()
-        crm_status = st.session_state.crm_data[['ת.ז לקוח', 'סטטוס']]
-        logic_df = merged_logic.merge(crm_status, on='ת.ז לקוח', how='left').fillna({'סטטוס': 'חדש'})
+        # חישוב לוגיקה לג'ימי (רק על עמודות קיימות)
+        merged_logic = df.groupby('ת.ז לקוח').agg({
+            c_assets: 'sum' if c_assets else 'count', 
+            'שם לקוח': 'first'
+        }).reset_index()
         
-        urgent_clients = logic_df[(logic_df[c_assets] > 100000) & (logic_df['סטטוס'] == 'חדש')]
+        crm_status = st.session_state.crm_data[['ת.ז לקוח', 'סטטוס']].copy()
+        crm_status['ת.ז לקוח'] = crm_status['ת.ז לקוח'].astype(str).str.strip()
+        
+        logic_df = merged_logic.merge(crm_status, on='ת.ז לקוח', how='left').fillna({'סטטוס': 'חדש'})
         
         col_jimmy1, col_jimmy2 = st.columns([2, 1])
         
         with col_jimmy1:
-            st.info(f"💡 **המלצת ג'ימי:** ישנם {len(urgent_clients)} לקוחות עם צבירה גבוהה שטרם נוצר איתם קשר. כדאי להתחיל מהם.")
-            if not urgent_clients.empty:
-                st.write(f"לקוחות בולטים: {', '.join(urgent_clients['שם לקוח'].head(3).tolist())}")
+            # המלצה חכמה
+            if c_assets:
+                urgent = logic_df[(logic_df[c_assets] > 150000) & (logic_df['סטטוס'] == 'חדש')]
+                if not urgent.empty:
+                    st.info(f"💡 **המלצת ג'ימי:** מצאתי {len(urgent)} לקוחות עם צבירה משמעותית שעדיין בסטטוס 'חדש'. כדאי לתת להם עדיפות.")
+                else:
+                    st.success("✅ ג'ימי בדק: נראה שכל הלקוחות הגדולים כבר בטיפול!")
+            else:
+                st.warning("ג'ימי לא מצא עמודת 'צבירה' לניתוח עומק.")
         
         with col_jimmy2:
-            st.metric("נכסים בטיפול", f"₪{df[c_assets].sum():,.0f}")
+            st.metric("נכסים בטיפול", f"₪{df[c_assets].sum():,.0f}" if c_assets else "0")
 
         st.divider()
 
@@ -68,68 +81,65 @@ if uploaded_file:
         tab1, tab2 = st.tabs(["📋 רשימת עבודה", "📊 ניתוח קטגוריות"])
         
         with tab2:
-            st.subheader("פילוח נכסים לפי מוצרים")
-            if c_product:
+            if c_product and c_assets:
+                st.subheader("פילוח נכסים לפי מוצרים")
                 prod_dist = df.groupby(c_product)[c_assets].sum().sort_values(ascending=False)
                 st.bar_chart(prod_dist)
-                st.table(prod_dist)
+            else:
+                st.write("אין מספיק נתונים להצגת גרפים.")
 
         with tab1:
-            # חיפוש וניהול
             search = st.text_input("🔍 חיפוש לקוח (שם או ת.ז):")
             
-            # הכנת דאטה ללקוחות
-            clients_summary = df.groupby('ת.ז לקוח').agg({
-                'שם לקוח': 'first', 
-                'טלפון סלולרי': 'first',
-                c_assets: 'sum',
-                c_premium: 'sum'
-            }).reset_index()
+            # הכנת סיכום ללקוחות
+            agg_map = {'שם לקוח': 'first', 'טלפון סלולרי': 'first'}
+            if c_assets: agg_map[c_assets] = 'sum'
+            if c_premium: agg_map[c_premium] = 'sum'
+            
+            clients_summary = df.groupby('ת.ז לקוח').agg(agg_map).reset_index()
             
             if search:
-                display_df = clients_summary[clients_summary['שם לקוח'].str.contains(search, na=False)]
+                display_df = clients_summary[clients_summary['שם לקוח'].str.contains(search, na=False) | clients_summary['ת.ז לקוח'].str.contains(search)]
             else:
                 display_df = clients_summary.head(20)
 
             for _, row in display_df.iterrows():
                 cid = str(row['ת.ז לקוח'])
                 stored = st.session_state.crm_data
-                current = stored[stored['ת.ז לקוח'].astype(str) == cid]
+                current = stored[stored['ת.ז לקוח'].astype(str).str.strip() == cid]
                 
                 s_val = current['סטטוס'].values[0] if not current.empty else "חדש"
                 n_val = current['הערות'].values[0] if not current.empty else ""
 
                 with st.expander(f"👤 {row['שם לקוח']} | סטטוס: {s_val}"):
-                    # תצוגת נתונים פיננסיים מלאה
-                    col_info1, col_info2 = st.columns(2)
-                    with col_info1:
+                    c_info1, c_info2 = st.columns(2)
+                    with c_info1:
                         st.write(f"**ת.ז:** {cid}")
                         st.write(f"**טלפון:** {row['טלפון סלולרי']}")
-                        st.write(f"**צבירה כוללת:** ₪{row[c_assets]:,.0f}")
+                        if c_assets: st.write(f"**צבירה כוללת:** ₪{row[c_assets]:,.0f}")
                     
-                    with col_info2:
+                    with c_info2:
                         st.write("**פירוט פוליסות:**")
-                        c_prods = df[df['ת.ז לקוח'] == cid][[c_product, c_company, c_assets]].copy()
-                        st.dataframe(c_prods, hide_index=True)
+                        show_cols = [c for c in [c_product, c_company, c_assets] if c]
+                        st.dataframe(df[df['ת.ז לקוח'] == cid][show_cols], hide_index=True)
 
-                    st.write("---")
-                    # עדכון CRM
-                    c_edit1, c_edit2 = st.columns(2)
-                    with c_edit1:
+                    st.divider()
+                    e1, e2 = st.columns(2)
+                    with e1:
                         new_s = st.selectbox("סטטוס טיפול:", ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"], key=f"s_{cid}",
                                              index=["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"].index(s_val) if s_val in ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"] else 0)
-                    with c_edit2:
-                        new_n = st.text_area("סיכום והערות:", value=n_val, key=f"n_{cid}")
+                    with e2:
+                        new_n = st.text_area("הערות:", value=n_val, key=f"n_{cid}")
                     
                     if st.button("שמור עדכון", key=f"b_{cid}"):
                         payload = {'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע", 'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")}
                         res = requests.post(SCRIPT_URL, json=payload)
                         if "Success" in res.text:
                             st.session_state.crm_data = load_data()
-                            st.success("המידע עודכן בגיליון שבע!")
+                            st.success("נשמר!")
                             st.rerun()
 
     except Exception as e:
         st.error(f"שגיאה בהצגת הנתונים: {e}")
 else:
-    st.info("אנא העלי קובץ ROETO כדי שג'ימי יוכל להתחיל בניתוח.")
+    st.info("👋 ברוכים הבאים למערכת שבע. העלי קובץ ROETO כדי שג'ימי יוכל לנתח את התיק.")
