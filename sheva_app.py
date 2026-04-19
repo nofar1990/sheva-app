@@ -22,14 +22,18 @@ def load_crm_data():
         return pd.DataFrame(columns=['ת.ז לקוח', 'סטטוס', 'נציג', 'הערות', 'עדכון'])
 
 def clean_val(val):
-    """הופך כל ערך למספר נקי"""
-    if pd.isna(val): return 0.0
-    s = str(val).replace(',', '').replace('₪', '').replace('%', '').strip()
-    res = re.findall(r"[-+]?\d*\.\d+|\d+", s)
-    return float(res[0]) if res else 0.0
+    """מנקה מספרים בצורה זהירה - שומר על נקודה עשרונית ומסיר פסיקים"""
+    if pd.isna(val) or val == '': return 0.0
+    # הסרת פסיקים וסימני מטבע, שמירה על נקודה אחת בלבד
+    s = str(val).replace(',', '').replace('₪', '').strip()
+    try:
+        return float(s)
+    except:
+        res = re.findall(r"[-+]?\d*\.\d+|\d+", s)
+        return float(res[0]) if res else 0.0
 
 # --- ממשק ---
-st.title("🛡️ שבע – מערכת ניהול חכמה (גרסת ייצוב)")
+st.title("🛡️ שבע – מערכת ניהול חכמה")
 
 if 'crm_data' not in st.session_state:
     st.session_state.crm_data = load_crm_data()
@@ -42,65 +46,75 @@ with col_up2:
 
 if f1:
     try:
-        # טעינה
         df1 = pd.read_excel(f1) if f1.name.endswith('.xlsx') else pd.read_csv(f1)
-        
-        # איחוד דוחות
+        id_col = next((c for c in df1.columns if 'ת.ז' in c or 'זהות' in c), df1.columns[0])
+        df1[id_col] = df1[id_col].astype(str).str.replace('.0', '', regex=False).str.strip()
+
         if f2:
             df2 = pd.read_excel(f2) if f2.name.endswith('.xlsx') else pd.read_csv(f2)
-            # זיהוי ת"ז אוטומטי לחיבור
-            id_col = next((c for c in df1.columns if 'ת.ז' in c or 'זהות' in c), df1.columns[0])
             id_col2 = next((c for c in df2.columns if 'ת.ז' in c or 'זהות' in c), df2.columns[0])
-            df1[id_col] = df1[id_col].astype(str).str.replace('.0', '', regex=False).str.strip()
             df2[id_col2] = df2[id_col2].astype(str).str.replace('.0', '', regex=False).str.strip()
+            # איחוד דוחות לפי ת"ז
             df = pd.merge(df1, df2, left_on=id_col, right_on=id_col2, how='left', suffixes=('', '_מפורט'))
-            st.success("✅ הדוחות חוברו בהצלחה")
         else:
             df = df1
-            id_col = next((c for c in df.columns if 'ת.ז' in c or 'זהות' in c), df.columns[0])
-            df[id_col] = df[id_col].astype(str).str.replace('.0', '', regex=False).str.strip()
 
-        # --- בחירת עמודות ידנית למניעת 0 ש"ח ---
+        # --- בחירת עמודות בסרגל צדי ---
         st.sidebar.header("⚙️ הגדרת עמודות")
-        col_name = st.sidebar.selectbox("עמודת שם לקוח:", df.columns, index=df.columns.get_loc(next((c for c in df.columns if 'שם' in c), df.columns[0])))
-        col_assets = st.sidebar.selectbox("עמודת נכסים/צבירה:", df.columns, index=0)
-        col_age = st.sidebar.selectbox("עמודת גיל:", df.columns, index=0)
+        col_name = st.sidebar.selectbox("שם לקוח:", df.columns, index=df.columns.get_loc(next((c for c in df.columns if 'שם' in c), df.columns[0])))
+        col_assets = st.sidebar.selectbox("עמודת נכסים (צבירה):", df.columns, index=0)
+        col_age = st.sidebar.selectbox("עמודת גיל/תאריך לידה:", df.columns, index=0)
         
-        # עיבוד נתונים
+        # עיבוד וניקוי
         df['assets_clean'] = df[col_assets].apply(clean_val)
         df['age_clean'] = df[col_age].apply(clean_val)
         
-        # --- סינונים ---
-        st.divider()
+        # חישוב סה"כ נכסים לכלל המשרד
+        total_office_assets = df.drop_duplicates(subset=[id_col, col_assets])['assets_clean'].sum()
+        st.metric("סה\"כ נכסים מנוהלים בדוח", f"₪{total_office_assets:,.0f}")
+
+        # --- חיפוש וסינון ---
         search = st.text_input("🔍 חיפוש לקוח לפי שם:")
         
-        # קטגוריות של ג'ימי
+        # קטגוריות
         retire = df[df['age_clean'] >= 55]
-        heavy = df[df['assets_clean'] >= 500000]
-        
-        t1, t2, t3 = st.tabs([f"👥 כל הלקוחות ({len(df[id_col].unique())})", 
-                              f"👴 פרישה ({len(retire[id_col].unique())})", 
-                              f"💎 לקוחות VIP ({len(heavy[id_col].unique())})"])
+        # VIP - לקוחות מעל חצי מיליון
+        heavy = df.groupby(id_col).filter(lambda x: x['assets_clean'].sum() >= 500000)
 
-        def show_list(data_to_show, tag):
-            summary = data_to_show.groupby(id_col).agg({col_name: 'first', 'assets_clean': 'sum', 'age_clean': 'max'}).reset_index()
+        t1, t2, t3 = st.tabs([
+            f"👥 כל הלקוחות ({len(df[id_col].unique())})", 
+            f"👴 פרישה ({len(retire[id_col].unique())})", 
+            f"💎 VIP ({len(heavy[id_col].unique())})"
+        ])
+
+        def show_list(data_df, tag):
+            # קיבוץ נכון לפי לקוח כדי למנוע ספירה כפולה
+            summary = data_df.groupby(id_col).agg({
+                col_name: 'first', 
+                'assets_clean': 'sum', 
+                'age_clean': 'max'
+            }).reset_index()
+            
             if search:
                 summary = summary[summary[col_name].str.contains(search, na=False)]
             
-            for _, row in summary.head(30).iterrows():
+            for _, row in summary.head(40).iterrows():
                 cid = str(row[id_col])
                 crm = st.session_state.crm_data
                 status = crm[crm['ת.ז לקוח'] == cid]['סטטוס'].values[0] if cid in crm['ת.ז לקוח'].values else "חדש"
                 
                 with st.expander(f"👤 {row[col_name]} | נכסים: ₪{row['assets_clean']:,.0f} | {status}"):
-                    c1, c2 = st.columns(2)
+                    c1, c2 = st.columns([2, 1])
                     with c1:
                         st.write(f"**ת.ז:** {cid} | **גיל:** {int(row['age_clean'])}")
-                        st.dataframe(df[df[id_col] == cid].dropna(axis=1, how='all'), hide_index=True)
+                        # הצגת המוצרים של הלקוח
+                        client_prods = df[df[id_col] == cid].dropna(axis=1, how='all')
+                        st.dataframe(client_prods, hide_index=True)
                     with c2:
-                        new_s = st.selectbox("סטטוס:", ["חדש", "בטיפול", "הושלם"], key=f"s_{cid}_{tag}")
-                        if st.button("שמור", key=f"b_{cid}_{tag}"):
-                            requests.post(SCRIPT_URL, json={'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "שבע"})
+                        new_s = st.selectbox("סטטוס:", ["חדש", "בטיפול", "הושלם", "לא עונה"], key=f"s_{cid}_{tag}")
+                        new_n = st.text_area("הערות:", key=f"n_{cid}_{tag}")
+                        if st.button("עדכן", key=f"b_{cid}_{tag}"):
+                            requests.post(SCRIPT_URL, json={'ת.ז לקוח': cid, 'סטטוס': new_s, 'הערות': new_n, 'נציג': "שבע"})
                             st.session_state.crm_data = load_crm_data()
                             st.rerun()
 
@@ -109,4 +123,4 @@ if f1:
         with t3: show_list(heavy, "vip")
 
     except Exception as e:
-        st.error(f"שגיאה: {e}")
+        st.error(f"שגיאה בעיבוד הנתונים: {e}")
