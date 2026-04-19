@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+import base64
 
 # הגדרות מותג שבע
 st.set_page_config(page_title="שבע - מערכת לקוחות", layout="wide")
@@ -10,41 +11,17 @@ st.set_page_config(page_title="שבע - מערכת לקוחות", layout="wide")
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # המפתח בשורה אחת ארוכה - הפתרון הכי יציב לשגיאות PEM
-    p_key = "-----BEGIN PRIVATE KEY-----" + "\n" + \
-            "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDgx0d6ZMNqpXgL" + "\n" + \
-            "WiogMgcSmS7QIuKimUE9LJGBpImMedHQaPqwBJsl2ifHlvV9NXm8z1waI+GF+qUS" + "\n" + \
-            "/NwZT7ZwqY4NhfRe1eYiJkaEFoU31wWHWRT6hg1tMP0Kppc+S37OAiNK92NLJig+" + "\n" + \
-            "qkIKPnoKXHtboCdJ2Tn0IeVNpAPqDpwGcYbI14Kg0xsUZlRVYT46CxjHF/rAEwcq" + "\n" + \
-            "fADoMH4iUJOFHh2KPOL8F9FA4Ljqs/gtzr/oEFu2dZXFmIXYG5IaEn2hyWusQBpT" + "\n" + \
-            "Od1R2HT/Wh7iaJAsnuvAj5TYhzlSHdeabc31CkgsEM2iwqQboyEwD3DTEx+Gkxlu" + "\n" + \
-            "xDMlr/3lAgMBAAECggEADWMpCWvbbKxevjRYSnMYUz3+2QQe4ebFSS6wmttRGuX9" + "\n" + \
-            "fk9mUNnxYJuB34QI6nRnI/zopCDrc2aWcs9PD43dFJAwpvMJtyU/r9x+Ois6M3Vx" + "\n" + \
-            "vZorYvFddtmiVIJQAzSNYJklf3dE+WqUHolW5hPLAnd4HGCpPl968WScategKQ4p" + "\n" + \
-            "mb8hAHP9mbgCzc9Wc3rSzwtmg95QzhKq2luu3oe57EYxqrS2vpokwS0ul3bHYi+i" + "\n" + \
-            "H/OonNHYc3o/ak5tGJz/A1UpUJVGh4dahqnrM6Ej1BkuxAVibVAWQ5wSv5HTA5Dq" + "\n" + \
-            "9SiJtj7zvWmBcVdJaGxGMhJ7U08w3xaHkXoL7fj5IQKBgQD5ZBJOHFSdWPCp0SfU" + "\n" + \
-            "zczBjMCObY8Q0+9+TWYovjYRYzy3Vfen2ua65p1x4RAglGdGe2naAVwTANvG9Glv" + "\n" + \
-            "F8kYn3Rv8hyupXFvWZTQmw0YfeZmXd8gETT9Ar2wKwzkw7HPAu2sVUqVTiNDhzA9" + "\n" + \
-            "nuXDjHhwtg1XEZH2g0Av3b26hoQKBgQDmvDsRJxe9icI8775PEsCwkHwrQ8E9t2Ba" + "\n" + \
-            "vQLgAQNllMATztgvhQIExwZEYDu1JfHm9ruhvfHvEH2QRufNibL1zyWT+YTjJSYO" + "\n" + \
-            "4OO1uhm5MkWr8c9wOa5ViQRjP/44EPWyosgawGqeIlWzPYwFkHjOPTFdEV2vuKTV" + "\n" + \
-            "LahZ4WJ9xQKBgQCEkw0kFu1oQ/qT28sX1ltt3LwUOuud33xmIREYwZ0OezmwoHOp" + "\n" + \
-            "+LVFUAkMm78uApYwIrUvnh9rPr6WsiFGXFebzlBgnk1fDjYSIoX4qyQ4C92qN2bA" + "\n" + \
-            "rkUD5ywddZVCG0HvsTfVr/WZD1OxtzEO7wCyy7PhAftbDqy2C0MBQ2yFYQKBgGmc" + "\n" + \
-            "LHkMaKxjmpljrrrovXPTnlH7QD7saVj+/IrlS9W6ATTPz1noymS/aBnx5kJi7Ncn" + "\n" + \
-            "hfhhRZSD+sUH/1+vsE8cknmpku6Y+VOEEhYC6XVAEm3CT41xiV8zSOPYzZaCBMPQ" + "\n" + \
-            "CEFeYy6gTpOtDyMY3oKftbGAml4s6J1+uXjyVa91AoGBAIgAF62Z2gmj1nMDukq4" + "\n" + \
-            "8KiKGiwu1+pB3kmqwp6pUvnJJ9E4ZNuDKSjRgw/9GBh0MM032qpB9D4WnQiQVmcf" + "\n" + \
-            "xAxzqcTSAQQdq+aL8D0CyGk1Q8bNPgSfq1cCaYdmq+2aztk39m3RkK1cABQv1nBU" + "\n" + \
-            "/6m7o+DtMxUh5mdEQFdeABf1" + "\n" + \
-            "-----END PRIVATE KEY-----"
+    # המפתח מקודד ב-Base64 כדי למנוע שגיאות PEM של רווחים ואנטרים
+    encoded_key = "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRRGd4MGQ2Wk1OcXBYZ0wKV2lvZ01nY1NtUzdRSXVLaW1VRTlMSkdCcEltTWVkSFFhUHF3QkpzbDJpZkhsdlY5TlltOHoxd2FJK0dGK3FVUwpL053WlQ3WndxWTROaGZSZTFlWWlKa2VFRm9VMzF3V0hXUlQ2aGcxdE1QMEtwcGMrUzM3T0FpTks5Mk5MSmlnKwpxa0lLUG5vS1hIdGJvQ2RKMlRuMEllVk5wQVBxRHB3R2NZYkkxNEtnMHhzVVpsUlZZVDQ2Q3hqSEYvckFFd2NxCmZBRG9NSDRpVUpPRkhoMktQT0w4RjlGQTRMunFzL2d0enIv b0V1MmRaWEZtSVhZRzVJYUVuMmh5V3VzUUJwVApPZDBSMkhUL1doN2lhSkFzbnV2QWo1VFlIemxTSGRlYWJjMzFDa2dzRU0yaXdxQm95RXdEM0RUUXgrRmt4bHUKeERNbHIvM2xBZ01CQUFFQ2dnRUFEV01wQ1d2YmJLeGV2alJZU25NWVV6MysyUVFlNGViRlNTNndtdHRSR3VYOQpmazltVU5ueFlKdUIzNFFJNm5Sbkkvem9wQ0RyYzJhV2NzOVBENDNkRkpBd3B2TUp0eVUvUjl4K09pczZNM1Z4CnZab3JZVkZkZHRtaVZJSlFBekNOWUprbGYzZEUrV3FVSG9sVzVoUExBbmQ0SEdDcFBsOTY4V1NjYXRlZ0tRNXAKbWI4aEFIUDltYmdDemM5V2MzclN6d3RtZzk1UXpLcnEybHV1M29lNTdFWXhxclMydnBva3dTMFVsM2JIWWkqaQpIL09vbm5IWWMzby9hazV0R0p6L0ExVXBVSlZHaDRkYWhxbnJNNkVqMUJrdXhBVmliVkFXUTV3U3Y1SVRBNURxCjlTaUp0ajd6dldtQmNWRGZKYUd4R01KSjdVMDh3M3hhSmtYb0w3Zmo1SVFLQmdRRDVaQkpPS EZTZFdQQ3AwU2ZVCnpjelNqTUNPYlk4UTArOStUV1lvdmpZUlloeTNWZmVuMnVhNjVwMXg0UkFnbEdkR2UybmFBVndUQU52RzlHbHYKRjhrWW4zUnY4aHl1cFhGdldaVFFtdzBZZmVabVhkOGdFVFQ5QXIyd0t3emt3N0hQQXUycy9WUnFWVGlORDh6QTkKdVhEakhId3RnMlhFWkgyZzBBdjNiMjZob1FLQmdRbm1Ec1JKeGU5aWNJODc3NVBFc0N3a0h3clE4RTl0MkJhCnZRTGdBUU5sbE1BUnp0Z3ZocUlFeHdaRVlEdTFKZkhtOXJ1aHZIdkVIMlFSdWZObWJMMTF6eVdUK1lUakpTWU8KNE9PMXVobTVNa1dyOGM5d09hNVZpUVJqUC80NEVQV3lvc2dhdzdxZUlMV3pQWXdGa0hqT1RGZEVWMnZ1S1RWQkxhaFo0V0o5eFFLQmdRQ0VrdzBrRnUxb1EvcVQyOHNIMWx0dDNMd1VPdWRkMzN4bUlSRVl3WjBPZXptd29IT3AKK0xWRlVBa01tNzh1QXBZd0lyVXZuaDlyUHI2V3NpRkdYRmViemxCZ25rMWZEallTSW9YNHF5UTRDOXJxTjJiQQpyay9VNDV5ZGRaVkNHMEh2c1RmVnIvV1pEMU94dHpFTzd3Q3l5N1BoQWZ0YlFxeTJDME1CUTF5RllRS0JnR21jCkxoa01hS3hqbXBsanJycm92WFBUbmxIN1FEN3NhVmp2L0lybFM5VzZBVFRQejFub3ltUy9hQm54NWtKaTdOY24KaGZoaFJaU0QrU1VILzErdnNFOY2tuZXBrdTZZK1ZPRUVoWUM2WFZBRW0zQ1Q0MXhpVjh6U09QWXpaYkNCTVBQCkNFRmVZejZnVHBvdER5TVkzb0tmdGJBQW1sNHM2SjErdVhqeVZhOTFBb0dCQUlnQUY2MloyZ21qMW5NRHVia3E0CjhLaUdpd3UxK3BCM2ttcXdwNnBVdm5KSTlFNEpOdURLU2pSZ3cvOUdCaDBNTTBTMnFwQjlENFdOUWlRVm1jZgp4QXh6cWNUU0FRUWRxK2FMOEQwQ3lHazFROGJOUGdTZnExY0NhWWRtcSsyYXp0azM5bTNSa0sxY0FCUXYxbkJVCi82bTdvK0R0TXhVaDVtZEVRRmRlQUJmMQotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="
+    
+    decoded_key_bytes = base64.b64decode(encoded_key)
+    private_key = decoded_key_bytes.decode("utf-8")
 
     info = {
         "type": "service_account",
         "project_id": "sheva-crm",
         "private_key_id": "ddf6cd036121d1f3f1b2342d3a44456d41c41b5b",
-        "private_key": p_key,
+        "private_key": private_key,
         "client_email": "sheva-manager@sheva-crm.iam.gserviceaccount.com",
         "token_uri": "https://oauth2.googleapis.com/token",
     }
@@ -110,3 +87,4 @@ if uploaded_file:
                     if save_to_sheet({'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע", 'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")}):
                         st.session_state.crm_data = load_data_from_sheet()
                         st.success("✅ נשמר!")
+                        st.rerun()
