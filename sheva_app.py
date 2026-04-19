@@ -10,7 +10,7 @@ st.set_page_config(page_title="שבע - מערכת לקוחות", layout="wide")
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # המפתח הפרטי מחולק לשורות - ניקוי רווחים אוטומטי למניעת שגיאות PEM
+    # המפתח מחולק לשורות - ה-strip() בסוף כל שורה מנקה רווחים סמויים שגורמים לשגיאת ה-PEM
     key_lines = [
         "-----BEGIN PRIVATE KEY-----",
         "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDgx0d6ZMNqpXgL",
@@ -41,7 +41,6 @@ def get_gsheet_client():
         "/6m7o+DtMxUh5mdEQFdeABf1",
         "-----END PRIVATE KEY-----"
     ]
-    # כאן התיקון החשוב: מנקים רווחים נסתרים מכל שורה ומחברים מחדש
     formatted_key = "\n".join([line.strip() for line in key_lines])
     
     info = {
@@ -82,7 +81,7 @@ def save_to_sheet(row_dict):
         sheet.update([df.columns.values.tolist()] + df.values.tolist())
         return True
     except Exception as e:
-        st.error(f"❌ שגיאה: {e}")
+        st.error(f"❌ שגיאה טכנית: {e}")
         return False
 
 # --- ממשק שבע ---
