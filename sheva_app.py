@@ -6,7 +6,7 @@ import requests
 # הגדרות מותג שבע
 st.set_page_config(page_title="שבע – ניהול לקוחות ופיננסים", layout="wide")
 
-# --- הגדרות חיבור ---
+# --- הגדרות חיבור סופיות (הצינור שלנו) ---
 SHEET_ID = "1-qwKNpPQnFvKrnWXFQIGpBhtmrp1s1zp7nPL0NBqwjA"
 SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwIJiLHWTQp3Yi6FdkSd8fke_HXPClUnnLmeYWFn7eWqoTYOlRvQGHLpQECAfVhgXh66A/exec"
 
@@ -18,11 +18,11 @@ def load_data():
     except Exception:
         return pd.DataFrame(columns=['ת.ז לקוח', 'סטטוס', 'נציג', 'הערות', 'עדכון'])
 
-# פונקציה למציאת עמודה גם אם השם לא מדויק
-def find_column(df, possible_names):
-    for name in possible_names:
-        if name in df.columns:
-            return name
+# פונקציה חכמה לזיהוי עמודות לפי רשימת אפשרויות
+def get_col(df, options):
+    for opt in options:
+        if opt in df.columns:
+            return opt
     return None
 
 # --- ממשק המערכת ---
@@ -35,42 +35,40 @@ uploaded_file = st.file_uploader("טעינת נתוני ROETO", type=['xlsx', 'c
 
 if uploaded_file:
     try:
+        # קריאת הקובץ
         df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
         df['ת.ז לקוח'] = df['ת.ז לקוח'].astype(str)
         
-        # זיהוי עמודות סכומים באופן גמיש
-        col_assets = find_column(df, ['צבירה', 'צבירה כוללת', 'שווי נכסים', 'סכום צבירה'])
-        col_premium = find_column(df, ['פרמיה חודשית', 'פרמיה', 'סך פרמיה'])
-        col_product = find_column(df, ['סוג מוצר', 'שם מוצר', 'תוכנית'])
+        # זיהוי עמודות קריטיות (גמיש)
+        c_assets = get_col(df, ['צבירה', 'צבירה כוללת', 'שווי נכסים', 'סכום צבירה', 'ערך פדיון'])
+        c_premium = get_col(df, ['פרמיה חודשית', 'פרמיה', 'סך פרמיה', 'פרמיה לחיסכון'])
+        c_company = get_col(df, ['חברה', 'שם חברה', 'שם יצרן', 'יצרן', 'גוף מנהל'])
+        c_product = get_col(df, ['סוג מוצר', 'שם מוצר', 'תוכנית', 'שם קופה'])
+
+        # --- Dashboard פיננסי ---
+        st.header("📊 תמונת מצב פיננסית")
+        c1, c2, c3 = st.columns(3)
+        total_a = df[c_assets].sum() if c_assets else 0
+        total_p = df[c_premium].sum() if c_premium else 0
         
-        # חישוב לוח בקרה כללי
-        st.header("📊 תמונת מצב פיננסית כללית")
-        c_a, c_b, c_c = st.columns(3)
-        
-        assets_val = df[col_assets].sum() if col_assets else 0
-        premium_val = df[col_premium].sum() if col_premium else 0
-        
-        c_a.metric("סה\"כ לקוחות", df['ת.ז לקוח'].nunique())
-        c_b.metric("סה\"כ פרמיה חודשית", f"₪{premium_val:,.0f}")
-        c_c.metric("סה\"כ צבירה (נכסים)", f"₪{assets_val:,.0f}")
+        c1.metric("סה\"כ לקוחות", df['ת.ז לקוח'].nunique())
+        c2.metric("סה\"כ פרמיה חודשית", f"₪{total_p:,.0f}")
+        c3.metric("סה\"כ צבירה (נכסים)", f"₪{total_a:,.0f}")
         
         st.divider()
 
         # --- ניהול לקוחות ---
-        st.header("👥 רשימת לקוחות ופירוט מוצרים")
+        st.header("👥 ניהול לקוחות ומוצרים")
         
-        # איחוד נתונים ברמת לקוח
-        agg_dict = {'שם לקוח': 'first', 'טלפון סלולרי': 'first'}
-        if col_assets: agg_dict[col_assets] = 'sum'
-        if col_premium: agg_dict[col_premium] = 'sum'
+        # בניית רשימת לקוחות מאוחדת
+        agg_map = {'שם לקוח': 'first', 'טלפון סלולרי': 'first'}
+        if c_assets: agg_map[c_assets] = 'sum'
+        if c_premium: agg_map[c_premium] = 'sum'
         
-        clients = df.groupby('ת.ז לקוח').agg(agg_dict).reset_index()
+        clients_df = df.groupby('ת.ז לקוח').agg(agg_map).reset_index()
         
-        search = st.text_input("🔍 חיפוש לקוח לפי שם או ת.ז:")
-        if search:
-            display_df = clients[(clients['שם לקוח'].str.contains(search, na=False)) | (clients['ת.ז לקוח'].contains(search))]
-        else:
-            display_df = clients.head(15)
+        search = st.text_input("🔍 חיפוש לפי שם לקוח:")
+        display_df = clients_df[clients_df['שם לקוח'].str.contains(search, na=False)] if search else clients_df.head(15)
 
         for _, row in display_df.iterrows():
             cid = str(row['ת.ז לקוח'])
@@ -80,50 +78,39 @@ if uploaded_file:
             s_val = current['סטטוס'].values[0] if not current.empty else "חדש"
             n_val = current['הערות'].values[0] if not current.empty else ""
 
-            with st.expander(f"👤 {row['שם לקוח']} | ת.ז {cid} | סטטוס: {s_val}"):
-                # סיכום כספי ללקוח
-                st.subheader("💰 סיכום נכסים")
+            with st.expander(f"👤 {row['שם לקוח']} | סטטוס: {s_val}"):
+                # מידע כספי
                 m1, m2, m3 = st.columns(3)
-                m1.metric("צבירה כוללת", f"₪{row[col_assets]:,.0f}" if col_assets else "N/A")
-                m2.metric("פרמיה חודשית", f"₪{row[col_premium]:,.0f}" if col_premium else "N/A")
+                m1.metric("צבירה", f"₪{row[c_assets]:,.0f}" if c_assets else "---")
+                m2.metric("פרמיה", f"₪{row[c_premium]:,.0f}" if c_premium else "---")
                 m3.write(f"📞 **טלפון:** {row['טלפון סלולרי']}")
                 
                 # פירוט מוצרים של הלקוח
-                st.write("---")
-                st.subheader("📂 פירוט פוליסות ומוצרים")
-                client_details = df[df['ת.ז לקוח'] == cid].copy()
-                # הצגת עמודות רלוונטיות בלבד
-                cols_to_show = [c for c in [col_product, 'חברה', col_assets, col_premium] if c]
-                st.dataframe(client_details[cols_to_show], use_container_width=True, hide_index=True)
+                st.write("**📂 פירוט מוצרים ופוליסות:**")
+                client_prods = df[df['ת.ז לקוח'] == cid].copy()
+                cols_to_show = [c for c in [c_product, c_company, c_assets, c_premium] if c]
+                st.table(client_prods[cols_to_show])
 
-                st.write("---")
-                # עדכון CRM
-                st.subheader("📝 עדכון טיפול")
-                edit_col1, edit_col2 = st.columns(2)
-                with edit_col1:
-                    new_s = st.selectbox("שינוי סטטוס:", 
-                                         ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"], 
-                                         key=f"s_{cid}",
+                st.divider()
+                
+                # עריכת CRM
+                e1, e2 = st.columns(2)
+                with e1:
+                    new_s = st.selectbox("שינוי סטטוס:", ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"], key=f"s_{cid}",
                                          index=["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"].index(s_val) if s_val in ["חדש", "בטיפול", "הושלם", "לא עונה", "לקוח פוטנציאלי"] else 0)
-                with edit_col2:
-                    new_n = st.text_area("הערות לטיפול:", value=n_val, key=f"n_{cid}")
+                with e2:
+                    new_n = st.text_area("הערות:", value=n_val, key=f"n_{cid}")
                 
                 if st.button("שמור שינויים", key=f"b_{cid}"):
                     with st.spinner("מעדכן..."):
-                        payload = {
-                            'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע",
-                            'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")
-                        }
-                        try:
-                            res = requests.post(SCRIPT_URL, json=payload)
-                            if "Success" in res.text:
-                                st.session_state.crm_data = load_data()
-                                st.success("נשמר בהצלחה!")
-                                st.rerun()
-                        except:
-                            st.error("שגיאת תקשורת בשמירה")
+                        payload = {'ת.ז לקוח': cid, 'סטטוס': new_s, 'נציג': "צוות שבע", 'הערות': new_n, 'עדכון': datetime.now().strftime("%d/%m/%Y %H:%M")}
+                        res = requests.post(SCRIPT_URL, json=payload)
+                        if "Success" in res.text:
+                            st.session_state.crm_data = load_data()
+                            st.success("נשמר!")
+                            st.rerun()
 
     except Exception as e:
-        st.error(f"שגיאה בניתוח הקובץ: {e}. וודאי שהעמודות 'פרמיה' ו'צבירה' קיימות.")
+        st.error(f"שגיאה בהצגת הנתונים: {e}")
 else:
-    st.info("אנא העלי קובץ ROETO כדי לראות את הנתונים הפיננסיים ולנהל את הלקוחות.")
+    st.info("אנא העלי קובץ ROETO כדי להתחיל.")
